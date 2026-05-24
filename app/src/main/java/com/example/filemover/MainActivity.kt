@@ -1,6 +1,9 @@
 package com.example.filemover
 
 import android.app.ProgressDialog
+import android.content.ClipData
+import android.content.ClipboardManager
+import android.content.Context
 import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
@@ -20,86 +23,20 @@ class MainActivity : AppCompatActivity() {
     private lateinit var binding: ActivityMainBinding
     private var sourceUri: Uri? = null
     private var destUri: Uri? = null
+    private var pickingFor = ""
 
     private val prefSourceKey = "source_uri"
     private val prefDestKey = "dest_uri"
 
-    private val sourcePicker = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        log("sourcePicker 回调: resultCode=${result.resultCode}, data=${result.data}")
-        if (result.resultCode == RESULT_OK && result.data?.data != null) {
-            val uri = result.data!!.data!!
-            log("源目录已选择: $uri")
-            takePersist(uri)
-            sourceUri = uri
-            getPreferences(MODE_PRIVATE).edit().putString(prefSourceKey, uri.toString()).apply()
-            updateSourceLabel(uri)
+    // 只用一个 launcher，避免多个 launcher 互抢回调
+    private val picker = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        log("回调: uri=$uri")
+        if (uri == null) {
+            log("用户取消或选择器异常退出")
+            return@registerForActivityResult
         }
-    }
-
-    private val destPicker = registerForActivityResult(
-        ActivityResultContracts.StartActivityForResult()
-    ) { result ->
-        log("destPicker 回调: resultCode=${result.resultCode}, data=${result.data}")
-        if (result.resultCode == RESULT_OK && result.data?.data != null) {
-            val uri = result.data!!.data!!
-            log("目标目录已选择: $uri")
-            takePersist(uri)
-            destUri = uri
-            getPreferences(MODE_PRIVATE).edit().putString(prefDestKey, uri.toString()).apply()
-            updateDestLabel(uri)
-        }
-    }
-
-    override fun onCreate(savedInstanceState: Bundle?) {
-        super.onCreate(savedInstanceState)
-        binding = ActivityMainBinding.inflate(layoutInflater)
-        setContentView(binding.root)
-
-        // 版本号
-        try {
-            val info = packageManager.getPackageInfo(packageName, 0)
-            binding.versionText.text = "v${info.versionName} (build ${info.versionCode})"
-        } catch (e: Exception) {
-            binding.versionText.text = "v?"
-        }
-
-        log("onCreate: 版本=${binding.versionText.text}")
-
-        restoreUris()
-
-        binding.sourceBtn.setOnClickListener {
-            log("点击 选择源目录")
-            openTree(sourcePicker)
-        }
-        binding.destBtn.setOnClickListener {
-            log("点击 选择目标目录")
-            openTree(destPicker)
-        }
-        binding.moveBtn.setOnClickListener { startMove() }
-    }
-
-    private fun openTree(picker: androidx.activity.result.ActivityResultLauncher<Intent>) {
-        // ACTION_OPEN_DOCUMENT_TREE 不需要任何特殊 flag，
-        // FLAG_GRANT_* 是用于跨 App 授权，放在这里反而干扰系统选择器
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
-        try {
-            log("启动文件选择器...")
-            picker.launch(intent)
-            log("选择器已启动")
-        } catch (e: Exception) {
-            log("启动选择器异常: ${e.message}")
-            Toast.makeText(this, "无法打开文件选择器: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
-
-    private fun log(msg: String) {
-        binding.logText.text = "${binding.logText.text}\n$msg"
-        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
-    }
-
-    private fun takePersist(uri: Uri) {
         try {
             contentResolver.takePersistableUriPermission(
                 uri,
@@ -107,6 +44,68 @@ class MainActivity : AppCompatActivity() {
                 Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         } catch (_: Exception) {}
+
+        when (pickingFor) {
+            "source" -> {
+                sourceUri = uri
+                getPreferences(MODE_PRIVATE).edit().putString(prefSourceKey, uri.toString()).apply()
+                updateSourceLabel(uri)
+                log("源目录已选择: ${uri.lastPathSegment}")
+            }
+            "dest" -> {
+                destUri = uri
+                getPreferences(MODE_PRIVATE).edit().putString(prefDestKey, uri.toString()).apply()
+                updateDestLabel(uri)
+                log("目标目录已选择: ${uri.lastPathSegment}")
+            }
+        }
+        pickingFor = ""
+    }
+
+    override fun onCreate(savedInstanceState: Bundle?) {
+        super.onCreate(savedInstanceState)
+        binding = ActivityMainBinding.inflate(layoutInflater)
+        setContentView(binding.root)
+
+        try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            binding.versionText.text = "v${info.versionName} (build ${info.versionCode})"
+        } catch (e: Exception) {
+            binding.versionText.text = "v?"
+        }
+        log("版本=${binding.versionText.text}")
+
+        restoreUris()
+
+        binding.sourceBtn.setOnClickListener {
+            pickingFor = "source"
+            log("启动源目录选择器...")
+            picker.launch(null)
+        }
+        binding.destBtn.setOnClickListener {
+            pickingFor = "dest"
+            log("启动目标目录选择器...")
+            picker.launch(null)
+        }
+        binding.moveBtn.setOnClickListener { startMove() }
+
+        binding.copyLogBtn.setOnClickListener {
+            val clipboard = getSystemService(Context.CLIPBOARD_SERVICE) as ClipboardManager
+            clipboard.setPrimaryClip(ClipData.newPlainText("log", binding.logText.text))
+            Toast.makeText(this, "日志已复制", Toast.LENGTH_SHORT).show()
+        }
+
+        binding.clearLogBtn.setOnClickListener {
+            binding.logText.text = "(等待操作...)"
+        }
+    }
+
+    private fun log(msg: String) {
+        binding.logText.text = "${binding.logText.text}\n$msg"
+        // 滚动到底部
+        binding.logScrollView.post {
+            binding.logScrollView.fullScroll(android.view.View.FOCUS_DOWN)
+        }
     }
 
     private fun restoreUris() {
@@ -125,12 +124,18 @@ class MainActivity : AppCompatActivity() {
         val name = DocumentFile.fromTreeUri(this, uri)?.name
             ?: uri.lastPathSegment ?: "已选择"
         binding.sourcePath.text = name
+        binding.sourceCheck.text = "✓"
+        binding.sourceCard.strokeWidth = 3
+        binding.sourceCard.strokeColor = 0xFF_4CAF50.toInt()
     }
 
     private fun updateDestLabel(uri: Uri) {
         val name = DocumentFile.fromTreeUri(this, uri)?.name
             ?: uri.lastPathSegment ?: "已选择"
         binding.destPath.text = name
+        binding.destCheck.text = "✓"
+        binding.destCard.strokeWidth = 3
+        binding.destCard.strokeColor = 0xFF_4CAF50.toInt()
     }
 
     private fun startMove() {
