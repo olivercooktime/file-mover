@@ -1,0 +1,14 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">文件快移</string>
+    <string name="select_source">选择源目录</string>
+    <string name="select_dest">选择目标目录</string>
+    <string name="start_move">一键移动文件</string>
+    <string name="source_hint">未选择</string>
+    <string name="dest_hint">未选择</string>
+    <string name="moving_title">正在移动文件…</string>
+    <string name="moving_message">请稍候，正在处理中</string>
+    <string name="move_done">移动完成</string>
+    <string name="source_label">源目录</string>
+    <string name="dest_label">目标目录</string>
+</resources>
