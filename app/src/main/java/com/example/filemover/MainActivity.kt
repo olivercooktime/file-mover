@@ -1,9 +1,11 @@
 package com.example.filemover
 
 import android.app.ProgressDialog
+import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import android.widget.Toast
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
@@ -23,9 +25,12 @@ class MainActivity : AppCompatActivity() {
     private val prefDestKey = "dest_uri"
 
     private val sourcePicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        log("sourcePicker 回调: resultCode=${result.resultCode}, data=${result.data}")
+        if (result.resultCode == RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            log("源目录已选择: $uri")
             takePersist(uri)
             sourceUri = uri
             getPreferences(MODE_PRIVATE).edit().putString(prefSourceKey, uri.toString()).apply()
@@ -34,9 +39,12 @@ class MainActivity : AppCompatActivity() {
     }
 
     private val destPicker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        if (uri != null) {
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        log("destPicker 回调: resultCode=${result.resultCode}, data=${result.data}")
+        if (result.resultCode == RESULT_OK && result.data?.data != null) {
+            val uri = result.data!!.data!!
+            log("目标目录已选择: $uri")
             takePersist(uri)
             destUri = uri
             getPreferences(MODE_PRIVATE).edit().putString(prefDestKey, uri.toString()).apply()
@@ -49,19 +57,54 @@ class MainActivity : AppCompatActivity() {
         binding = ActivityMainBinding.inflate(layoutInflater)
         setContentView(binding.root)
 
+        // 版本号
+        try {
+            val info = packageManager.getPackageInfo(packageName, 0)
+            binding.versionText.text = "v${info.versionName} (build ${info.versionCode})"
+        } catch (e: Exception) {
+            binding.versionText.text = "v?"
+        }
+
+        log("onCreate: 版本=${binding.versionText.text}")
+
         restoreUris()
 
-        binding.sourceBtn.setOnClickListener { sourcePicker.launch(null) }
-        binding.destBtn.setOnClickListener { destPicker.launch(null) }
+        binding.sourceBtn.setOnClickListener {
+            log("点击 选择源目录")
+            openTree(sourcePicker)
+        }
+        binding.destBtn.setOnClickListener {
+            log("点击 选择目标目录")
+            openTree(destPicker)
+        }
         binding.moveBtn.setOnClickListener { startMove() }
+    }
+
+    private fun openTree(picker: androidx.activity.result.ActivityResultLauncher<Intent>) {
+        // ACTION_OPEN_DOCUMENT_TREE 不需要任何特殊 flag，
+        // FLAG_GRANT_* 是用于跨 App 授权，放在这里反而干扰系统选择器
+        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE)
+        try {
+            log("启动文件选择器...")
+            picker.launch(intent)
+            log("选择器已启动")
+        } catch (e: Exception) {
+            log("启动选择器异常: ${e.message}")
+            Toast.makeText(this, "无法打开文件选择器: ${e.message}", Toast.LENGTH_LONG).show()
+        }
+    }
+
+    private fun log(msg: String) {
+        binding.logText.text = "${binding.logText.text}\n$msg"
+        Toast.makeText(this, msg, Toast.LENGTH_SHORT).show()
     }
 
     private fun takePersist(uri: Uri) {
         try {
             contentResolver.takePersistableUriPermission(
                 uri,
-                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
-                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                Intent.FLAG_GRANT_WRITE_URI_PERMISSION
             )
         } catch (_: Exception) {}
     }
@@ -103,6 +146,8 @@ class MainActivity : AppCompatActivity() {
             return
         }
 
+        log("开始移动: $src -> $dst")
+
         val dialog = ProgressDialog(this).apply {
             setTitle(getString(R.string.moving_title))
             setMessage(getString(R.string.moving_message))
@@ -122,6 +167,8 @@ class MainActivity : AppCompatActivity() {
                 result.failed == 0 -> "全部 ${result.success} 个文件移动完成"
                 else -> "${result.success} 个成功，${result.failed} 个失败"
             }
+
+            log(msg)
 
             android.app.AlertDialog.Builder(this@MainActivity)
                 .setTitle(getString(R.string.move_done))
