@@ -80,12 +80,13 @@ class MainActivity : AppCompatActivity() {
         binding.sourceBtn.setOnClickListener {
             pickingFor = "source"
             log("启动源目录选择器...")
-            picker.launch(null)
+            // 传入当前 URI，选择器在此目录打开但仍可导航到其他位置
+            picker.launch(sourceUri)
         }
         binding.destBtn.setOnClickListener {
             pickingFor = "dest"
             log("启动目标目录选择器...")
-            picker.launch(null)
+            picker.launch(destUri)
         }
         binding.moveBtn.setOnClickListener { startMove() }
 
