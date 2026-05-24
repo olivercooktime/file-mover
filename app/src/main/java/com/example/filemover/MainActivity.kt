@@ -1,10 +1,10 @@
 package com.example.filemover
 
 import android.app.ProgressDialog
-import android.content.Intent
 import android.net.Uri
 import android.os.Bundle
 import android.provider.DocumentsContract
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.documentfile.provider.DocumentFile
 import androidx.lifecycle.lifecycleScope
@@ -22,6 +22,28 @@ class MainActivity : AppCompatActivity() {
     private val prefSourceKey = "source_uri"
     private val prefDestKey = "dest_uri"
 
+    private val sourcePicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            takePersist(uri)
+            sourceUri = uri
+            getPreferences(MODE_PRIVATE).edit().putString(prefSourceKey, uri.toString()).apply()
+            updateSourceLabel(uri)
+        }
+    }
+
+    private val destPicker = registerForActivityResult(
+        ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        if (uri != null) {
+            takePersist(uri)
+            destUri = uri
+            getPreferences(MODE_PRIVATE).edit().putString(prefDestKey, uri.toString()).apply()
+            updateDestLabel(uri)
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         binding = ActivityMainBinding.inflate(layoutInflater)
@@ -29,9 +51,19 @@ class MainActivity : AppCompatActivity() {
 
         restoreUris()
 
-        binding.sourceBtn.setOnClickListener { pickDirectory(REQ_SOURCE) }
-        binding.destBtn.setOnClickListener { pickDirectory(REQ_DEST) }
+        binding.sourceBtn.setOnClickListener { sourcePicker.launch(null) }
+        binding.destBtn.setOnClickListener { destPicker.launch(null) }
         binding.moveBtn.setOnClickListener { startMove() }
+    }
+
+    private fun takePersist(uri: Uri) {
+        try {
+            contentResolver.takePersistableUriPermission(
+                uri,
+                android.content.Intent.FLAG_GRANT_READ_URI_PERMISSION or
+                android.content.Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+            )
+        } catch (_: Exception) {}
     }
 
     private fun restoreUris() {
@@ -46,50 +78,15 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    private fun pickDirectory(requestCode: Int) {
-        val intent = Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-        }
-        startActivityForResult(intent, requestCode)
-    }
-
-    @Deprecated("Deprecated in Java")
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-
-        if (resultCode != RESULT_OK || data?.data == null) return
-
-        val uri = data.data!!
-
-        // 持久化权限，下次打开 App 不用重新选
-        contentResolver.takePersistableUriPermission(
-            uri,
-            Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_GRANT_WRITE_URI_PERMISSION
-        )
-
-        val prefs = getPreferences(MODE_PRIVATE)
-
-        when (requestCode) {
-            REQ_SOURCE -> {
-                sourceUri = uri
-                prefs.edit().putString(prefSourceKey, uri.toString()).apply()
-                updateSourceLabel(uri)
-            }
-            REQ_DEST -> {
-                destUri = uri
-                prefs.edit().putString(prefDestKey, uri.toString()).apply()
-                updateDestLabel(uri)
-            }
-        }
-    }
-
     private fun updateSourceLabel(uri: Uri) {
-        val name = DocumentFile.fromTreeUri(this, uri)?.name ?: uri.lastPathSegment ?: "已选择"
+        val name = DocumentFile.fromTreeUri(this, uri)?.name
+            ?: uri.lastPathSegment ?: "已选择"
         binding.sourcePath.text = name
     }
 
     private fun updateDestLabel(uri: Uri) {
-        val name = DocumentFile.fromTreeUri(this, uri)?.name ?: uri.lastPathSegment ?: "已选择"
+        val name = DocumentFile.fromTreeUri(this, uri)?.name
+            ?: uri.lastPathSegment ?: "已选择"
         binding.destPath.text = name
     }
 
@@ -140,7 +137,6 @@ class MainActivity : AppCompatActivity() {
         val srcDir = DocumentFile.fromTreeUri(this, srcUri) ?: return MoveResult(0, 0, 0)
         val dstDir = DocumentFile.fromTreeUri(this, dstUri) ?: return MoveResult(0, 0, 0)
 
-        // 只取当前目录下的文件（不递归子目录）
         val files = srcDir.listFiles().filter { it.isFile }
         var success = 0
         var failed = 0
@@ -150,36 +146,22 @@ class MainActivity : AppCompatActivity() {
                 val movedUri = DocumentsContract.moveDocument(
                     contentResolver,
                     file.uri,
-                    file.uri,                   // parent
-                    dstUri                      // target parent
+                    file.uri,
+                    dstUri
                 )
                 if (movedUri != null) {
                     success++
                 } else {
-                    // moveDocument 返回 null，尝试手动复制+删除
-                    if (copyAndDelete(file, dstDir)) {
-                        success++
-                    } else {
-                        failed++
-                    }
+                    if (copyAndDelete(file, dstDir)) success++ else failed++
                 }
-            } catch (e: Exception) {
-                // moveDocument 失败时降级为 copyAndDelete
-                if (copyAndDelete(file, dstDir)) {
-                    success++
-                } else {
-                    failed++
-                }
+            } catch (_: Exception) {
+                if (copyAndDelete(file, dstDir)) success++ else failed++
             }
         }
 
         return MoveResult(success, failed, files.size)
     }
 
-    /**
-     * 降级方案：当 DocumentsContract.moveDocument 不可用时，
-     * 使用 contentResolver 手动复制然后删除。
-     */
     private fun copyAndDelete(srcFile: DocumentFile, dstDir: DocumentFile): Boolean {
         return try {
             val newFile = dstDir.createFile(
@@ -196,17 +178,10 @@ class MainActivity : AppCompatActivity() {
                 return false
             }
 
-            // 复制成功后删除源文件
             srcFile.delete()
             true
         } catch (e: Exception) {
-            e.printStackTrace()
             false
         }
-    }
-
-    companion object {
-        private const val REQ_SOURCE = 1001
-        private const val REQ_DEST = 1002
     }
 }
