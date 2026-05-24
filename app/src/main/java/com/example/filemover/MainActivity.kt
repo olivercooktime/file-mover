@@ -28,13 +28,15 @@ class MainActivity : AppCompatActivity() {
     private val prefSourceKey = "source_uri"
     private val prefDestKey = "dest_uri"
 
-    // 只用一个 launcher，避免多个 launcher 互抢回调
+    // 使用 StartActivityForResult 以便完全控制 Intent，
+    // 绕开 OpenDocumentTree 在小米 HyperOS 上的缓存 bug
     private val picker = registerForActivityResult(
-        ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        log("回调: uri=$uri")
-        if (uri == null) {
-            log("用户取消或选择器异常退出")
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        log("回调: resultCode=${result.resultCode}, data=${result.data?.data}")
+        val uri = result.data?.data
+        if (result.resultCode != RESULT_OK || uri == null) {
+            log("用户取消或选择器退出")
             return@registerForActivityResult
         }
         try {
@@ -74,19 +76,19 @@ class MainActivity : AppCompatActivity() {
             binding.versionText.text = "v?"
         }
         log("版本=${binding.versionText.text}")
+        log("厂商=${android.os.Build.MANUFACTURER} 型号=${android.os.Build.MODEL} SDK=${android.os.Build.VERSION.SDK_INT}")
 
         restoreUris()
 
         binding.sourceBtn.setOnClickListener {
             pickingFor = "source"
             log("启动源目录选择器...")
-            // 传入当前 URI，选择器在此目录打开但仍可导航到其他位置
-            picker.launch(sourceUri)
+            picker.launch(buildTreeIntent())
         }
         binding.destBtn.setOnClickListener {
             pickingFor = "dest"
             log("启动目标目录选择器...")
-            picker.launch(destUri)
+            picker.launch(buildTreeIntent())
         }
         binding.moveBtn.setOnClickListener { startMove() }
 
@@ -101,9 +103,29 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * 构建 ACTION_OPEN_DOCUMENT_TREE Intent。
+     * 关键 workaround：EXTRA_INITIAL_URI 使用 document 型 URI（非 tree URI）
+     * 否则小米 HyperOS / 部分 Android 版本会复用上次缓存的目录、隐藏"使用此文件夹"按钮。
+     * 参考：https://stackoverflow.com/questions/76831665
+     */
+    private fun buildTreeIntent(): Intent {
+        return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            // document URI 而非 tree URI —— 这是避开缓存 bug 的关键
+            val rootUri = DocumentsContract.buildDocumentUri(
+                "com.android.externalstorage.documents",
+                "primary:"
+            )
+            putExtra(DocumentsContract.EXTRA_INITIAL_URI, rootUri)
+            addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
+            addFlags(Intent.FLAG_GRANT_PREFIX_URI_PERMISSION)
+        }
+    }
+
     private fun log(msg: String) {
         binding.logText.text = "${binding.logText.text}\n$msg"
-        // 滚动到底部
         binding.logScrollView.post {
             binding.logScrollView.fullScroll(android.view.View.FOCUS_DOWN)
         }
