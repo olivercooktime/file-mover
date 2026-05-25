@@ -103,20 +103,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    /**
-     * 构建 ACTION_OPEN_DOCUMENT_TREE Intent。
-     * 关键 workaround：EXTRA_INITIAL_URI 使用 document 型 URI（非 tree URI）
-     * 否则小米 HyperOS / 部分 Android 版本会复用上次缓存的目录、隐藏"使用此文件夹"按钮。
-     * 参考：https://stackoverflow.com/questions/76831665
-     */
     private fun buildTreeIntent(): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
-            // document URI 而非 tree URI —— 这是避开缓存 bug 的关键
-            val rootUri = DocumentsContract.buildDocumentUri(
-                "com.android.externalstorage.documents",
-                "primary:"
-            )
-            putExtra(DocumentsContract.EXTRA_INITIAL_URI, rootUri)
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
@@ -221,7 +209,7 @@ class MainActivity : AppCompatActivity() {
                 val movedUri = DocumentsContract.moveDocument(
                     contentResolver,
                     file.uri,
-                    file.uri,
+                    srcUri,
                     dstUri
                 )
                 if (movedUri != null) {
@@ -245,7 +233,7 @@ class MainActivity : AppCompatActivity() {
             ) ?: return false
 
             contentResolver.openInputStream(srcFile.uri)?.use { input ->
-                contentResolver.openOutputStream(newFile.uri, "wt")?.use { output ->
+                contentResolver.openOutputStream(newFile.uri, "w")?.use { output ->
                     input.copyTo(output)
                 }
             } ?: run {
