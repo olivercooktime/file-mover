@@ -103,6 +103,8 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    // Do not provide EXTRA_INITIAL_URI. Some OEM pickers reuse or immediately
+    // return a cached location when an initial URI is supplied.
     private fun buildTreeIntent(): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
