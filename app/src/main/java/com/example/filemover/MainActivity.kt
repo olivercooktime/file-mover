@@ -6,6 +6,7 @@ import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
 import android.provider.DocumentsContract
 import android.widget.Toast
@@ -103,10 +104,19 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
-    // Do not provide EXTRA_INITIAL_URI. Some OEM pickers reuse or immediately
-    // return a cached location when an initial URI is supplied.
     private fun buildTreeIntent(): Intent {
         return Intent(Intent.ACTION_OPEN_DOCUMENT_TREE).apply {
+            // HyperOS restores the last approved directory when no initial URI
+            // is supplied and can immediately return that stale selection.
+            // Start from a normal selectable directory instead of "primary:",
+            // whose storage root is restricted on Android 11 and newer.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                val documentsUri = DocumentsContract.buildDocumentUri(
+                    "com.android.externalstorage.documents",
+                    "primary:Documents"
+                )
+                putExtra(DocumentsContract.EXTRA_INITIAL_URI, documentsUri)
+            }
             addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_WRITE_URI_PERMISSION)
             addFlags(Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION)
